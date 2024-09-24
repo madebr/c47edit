@@ -1,0 +1,54 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: 'MSVC ${{ matrix.platform.platform }} ${{ matrix.platform.configuration }}'
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { configuration: Release, platform: x64, vcpkg-triplet: x64-windows-release }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+        run: |
+          vcpkg install                                       `
+            miniz:${{matrix.platform.vcpkg-triplet}}          `
+            nlohmann-json:${{matrix.platform.vcpkg-triplet}}  `
+            stb:${{matrix.platform.vcpkg-triplet}}            `
+            libsquish:${{matrix.platform.vcpkg-triplet}}      `
+            glew:${{matrix.platform.vcpkg-triplet}}           `
+            assimp:${{matrix.platform.vcpkg-triplet}}         `
+            fmt:${{matrix.platform.vcpkg-triplet}}
+
+          vcpkg integrate install
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Build
+        shell: cmd
+        run: |
+          set CL=/DAPPVEYOR /DAPP_VERSION${{ github.event.pull_request.number || github.run_id }}"
+          msbuild c47edit.sln -p:Configuration=${{ matrix.platform.configuration }} -p:Platform=${{ matrix.platform.platform }} -p:BuildInParallel=true
+      - name: Create package
+        run: |
+          cd ${{ matrix.platform.configuration }}
+          7za c47edit.zip c47edit.exe *dll ..\classes.json
+      - name: 'Upload binary package'
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: c47edit-${{ matrix.platform.configuration }}
+          path: build/dist/SDL3*
